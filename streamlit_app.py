@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, mannwhitneyu, kruskal
 
 st.set_page_config(
     page_title="Dashboard Bienestar Laboral",
@@ -147,6 +147,41 @@ def corr_direction(rho: float) -> str:
     return "positiva" if rho > 0 else "negativa" if rho < 0 else "nula"
 
 
+def safe_p_value_text(p_value: float) -> str:
+    if pd.isna(p_value):
+        return "no calculable"
+    if p_value < 0.001:
+        return "< 0.001"
+    return f"{p_value:.4f}"
+
+
+def group_test(data: pd.DataFrame, group_col: str, metric_col: str) -> tuple[str, float, float]:
+    temp = data[[group_col, metric_col]].dropna()
+    groups = [
+        values[metric_col].dropna().values
+        for _, values in temp.groupby(group_col)
+        if len(values[metric_col].dropna()) >= 2
+    ]
+
+    if len(groups) < 2:
+        return "No calculable", float("nan"), float("nan")
+
+    if len(groups) == 2:
+        stat, p_value = mannwhitneyu(groups[0], groups[1], alternative="two-sided")
+        return "Mann-Whitney U", stat, p_value
+
+    stat, p_value = kruskal(*groups)
+    return "Kruskal-Wallis", stat, p_value
+
+
+def interpret_group_test(p_value: float) -> str:
+    if pd.isna(p_value):
+        return "no hay suficientes datos para calcular una prueba estadística confiable"
+    if p_value < 0.05:
+        return "sí hay evidencia de diferencias estadísticamente significativas entre los grupos"
+    return "no hay evidencia estadística suficiente para afirmar diferencias entre los grupos"
+
+
 def prepare(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
@@ -273,13 +308,14 @@ def write_dynamic_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
     with c1:
         st.markdown(
             f"""
-            En la muestra filtrada se analizan **{len(data)} trabajadores**. 
-            La historia principal del dashboard es identificar **dónde está el riesgo psicosocial**, 
-            qué recursos organizacionales pueden estar protegiendo a los trabajadores y cómo se relacionan 
-            las variables críticas de bienestar laboral.
+            Este dashboard está pensado para presentar el proyecto como una historia: primero se muestra
+            **quiénes componen la muestra**, luego se identifican las **dimensiones de mayor urgencia**,
+            después se revisan **distribuciones, relaciones y diferencias entre grupos**, y al final se
+            cierran los hallazgos con recomendaciones.
 
-            La dimensión con mayor urgencia actual es **{top_risks.iloc[0]["Dimensión"]}**
-            con un puntaje de urgencia de **{top_risks.iloc[0]["Urgencia 0-100"]:.1f}/100**.
+            En la muestra filtrada se analizan **{len(data)} trabajadores**. La dimensión con mayor urgencia
+            actual es **{top_risks.iloc[0]["Dimensión"]}**, con un puntaje de
+            **{top_risks.iloc[0]["Urgencia 0-100"]:.1f}/100**.
             """
         )
 
@@ -300,8 +336,8 @@ def write_dynamic_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
             f"""
             **Burnout y desgaste laboral**  
             La relación BU–DL es **{corr_direction(rho_bu_dl)} {corr_strength(rho_bu_dl)}**
-            ($\\rho$ = {rho_bu_dl:.2f}, p = {p_bu_dl:.4f}).  
-            Esto indica que cuando el agotamiento aumenta, el desgaste laboral tiende a moverse en la misma dirección.
+            ($\\rho$ = {rho_bu_dl:.2f}, p = {safe_p_value_text(p_bu_dl)}).  
+            Esta lectura ayuda a ver si el agotamiento emocional y el deterioro laboral se presentan juntos.
             """
         )
 
@@ -309,7 +345,7 @@ def write_dynamic_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
             f"""
             **Satisfacción e intención de retiro**  
             La relación SAT–IR es **{corr_direction(rho_sat_ir)} {corr_strength(rho_sat_ir)}**
-            ($\\rho$ = {rho_sat_ir:.2f}, p = {p_sat_ir:.4f}).  
+            ($\\rho$ = {rho_sat_ir:.2f}, p = {safe_p_value_text(p_sat_ir)}).  
             Si la relación es negativa, significa que mayor satisfacción se asocia con menor intención de retiro.
             """
         )
@@ -319,7 +355,7 @@ def write_dynamic_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
             f"""
             **Compromiso del líder y satisfacción**  
             La relación CL–SAT es **{corr_direction(rho_cl_sat)} {corr_strength(rho_cl_sat)}**
-            ($\\rho$ = {rho_cl_sat:.2f}, p = {p_cl_sat:.4f}).  
+            ($\\rho$ = {rho_cl_sat:.2f}, p = {safe_p_value_text(p_cl_sat)}).  
             Esto ayuda a evaluar si el liderazgo funciona como recurso protector.
             """
         )
@@ -328,7 +364,7 @@ def write_dynamic_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
             f"""
             **Compromiso del líder y burnout**  
             La relación CL–BU es **{corr_direction(rho_cl_bu)} {corr_strength(rho_cl_bu)}**
-            ($\\rho$ = {rho_cl_bu:.2f}, p = {p_cl_bu:.4f}).  
+            ($\\rho$ = {rho_cl_bu:.2f}, p = {safe_p_value_text(p_cl_bu)}).  
             Una relación negativa sugiere que mejores prácticas de liderazgo se asocian con menor agotamiento.
             """
         )
@@ -386,24 +422,65 @@ def plot_risk_ranking(risk_df: pd.DataFrame) -> None:
 
     st.markdown(
         """
-        Todas las dimensiones se transforman a una escala común de **0 a 100** para poder compararlas.
-        En variables de riesgo, valores altos significan mayor riesgo. En variables de recurso, valores bajos 
-        significan mayor urgencia porque indican menor protección organizacional.
+        Esta sección responde cuáles dimensiones requieren más atención. Todas las escalas se llevan a
+        **0–100** para poder compararlas. En las variables de riesgo, un valor alto implica mayor exposición.
+        En las variables de recurso, la lógica se invierte: un valor bajo del recurso genera más urgencia,
+        porque indica menor protección organizacional.
         """
     )
 
-    fig = px.bar(
-        risk_df.sort_values("Urgencia 0-100"),
-        x="Urgencia 0-100",
-        y="Dimensión",
-        color="Tipo",
-        orientation="h",
-        text="Urgencia 0-100",
-        title="Ranking de urgencia psicosocial",
+    plot_df = risk_df.sort_values("Urgencia 0-100", ascending=True).copy()
+    colors = plot_df["Tipo"].map({"Riesgo": "#EF553B", "Recurso": "#00CC96"}).fillna("#636EFA")
+
+    fig = go.Figure()
+
+    for _, row in plot_df.iterrows():
+        fig.add_trace(
+            go.Scatter(
+                x=[0, row["Urgencia 0-100"]],
+                y=[row["Dimensión"], row["Dimensión"]],
+                mode="lines",
+                line=dict(color="rgba(120,120,120,0.35)", width=3),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df["Urgencia 0-100"],
+            y=plot_df["Dimensión"],
+            mode="markers+text",
+            marker=dict(size=16, color=colors, line=dict(width=1, color="white")),
+            text=plot_df["Urgencia 0-100"].round(1),
+            textposition="middle right",
+            customdata=plot_df[["Código", "Tipo", "Media", "Mediana"]],
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Código: %{customdata[0]}<br>"
+                "Tipo: %{customdata[1]}<br>"
+                "Urgencia: %{x:.1f}/100<br>"
+                "Media: %{customdata[2]:.2f}<br>"
+                "Mediana: %{customdata[3]:.2f}<extra></extra>"
+            ),
+            showlegend=False,
+        )
     )
-    fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
-    fig.update_layout(xaxis_title="Urgencia 0-100", yaxis_title="")
+
+    fig.update_layout(
+        title="Ranking de urgencia psicosocial",
+        xaxis_title="Urgencia 0-100",
+        yaxis_title="",
+        height=620,
+        margin=dict(l=20, r=40, t=60, b=40),
+    )
+    fig.update_xaxes(range=[0, 105])
     st.plotly_chart(fig, width="stretch")
+
+    st.caption(
+        "Se usa un gráfico tipo lollipop porque el objetivo principal es ordenar prioridades. "
+        "La línea facilita comparar distancia entre dimensiones y el punto marca el nivel exacto de urgencia."
+    )
 
     st.dataframe(
         risk_df.round(2),
@@ -417,8 +494,10 @@ def plot_dimension_distribution(data: pd.DataFrame) -> None:
 
     st.markdown(
         """
-        Los histogramas muestran la frecuencia de trabajadores en cada rango de puntaje.
-        Esto permite identificar si una dimensión está concentrada en niveles bajos, medios o altos.
+        Esta sección permite explicar cómo se comporta una dimensión en la muestra filtrada.
+        El histograma muestra la frecuencia de trabajadores en cada rango de puntaje y el boxplot marginal
+        ayuda a identificar mediana, dispersión y posibles valores extremos. Para este caso, esta combinación
+        es más clara que usar únicamente una barra de promedio.
         """
     )
 
@@ -436,6 +515,7 @@ def plot_dimension_distribution(data: pd.DataFrame) -> None:
         nbins=20,
         marginal="box",
         title=f"Distribución de {selected_dim} - {meta['label']}",
+        labels={selected_dim: f"{selected_dim} - {meta['label']}"},
     )
     fig.update_layout(
         xaxis_title="Puntaje promedio",
@@ -446,14 +526,22 @@ def plot_dimension_distribution(data: pd.DataFrame) -> None:
     mean_value = data[selected_dim].mean()
     median_value = data[selected_dim].median()
     std_value = data[selected_dim].std()
+    skew_value = data[selected_dim].skew()
+
+    if abs(skew_value) < 0.5:
+        skew_text = "aproximadamente simétrica"
+    elif skew_value > 0:
+        skew_text = "con asimetría positiva, es decir, con cola hacia puntajes altos"
+    else:
+        skew_text = "con asimetría negativa, es decir, con concentración hacia puntajes altos y cola hacia puntajes bajos"
 
     st.markdown(
         f"""
         **Interpretación:**  
         La media de **{meta['label']}** es **{mean_value:.2f}**, la mediana es **{median_value:.2f}**
-        y la desviación estándar es **{std_value:.2f}**.  
-        La media resume el nivel promedio de la dimensión, la mediana representa el valor central
-        y la desviación estándar muestra qué tanta variabilidad existe entre trabajadores.
+        y la desviación estándar es **{std_value:.2f}**. La distribución es **{skew_text}**.
+        Esta lectura permite saber si el resultado general representa a la mayoría o si hay subgrupos
+        con experiencias diferentes.
         """
     )
 
@@ -525,8 +613,10 @@ def plot_group_comparisons(data: pd.DataFrame) -> None:
 
     st.markdown(
         """
-        Las comparaciones por grupo permiten identificar segmentos de trabajadores con mayor exposición a riesgo 
-        o con mejores condiciones de bienestar.
+        Las comparaciones por grupo ayudan a responder si ciertos segmentos de trabajadores presentan
+        mayor exposición a riesgo o mejores condiciones de bienestar. Aquí se usa un gráfico de violín
+        con caja interna porque permite ver **forma de la distribución, mediana, dispersión y diferencias
+        entre grupos** en una sola visualización.
         """
     )
 
@@ -544,38 +634,72 @@ def plot_group_comparisons(data: pd.DataFrame) -> None:
         st.warning(f"No se encontró la columna `{x}` en el dataset.")
         return
 
-    fig = px.box(
-        data,
-        x=x,
-        y=y,
+    temp = data[[x, y]].dropna()
+    if temp.empty:
+        st.warning("No hay datos suficientes para esta comparación con los filtros actuales.")
+        return
+
+    order = (
+        temp.groupby(x, dropna=False)[y]
+        .median()
+        .sort_values(ascending=False)
+        .index
+        .tolist()
+    )
+
+    fig = px.violin(
+        temp,
+        x=y,
+        y=x,
         color=x,
-        points="outliers",
+        category_orders={x: order},
+        box=True,
+        points="all",
         title=selected,
         labels={
             x: x,
             y: f"{y} - {dimensions[y]['label']}",
         },
+        orientation="h",
+    )
+    fig.update_traces(meanline_visible=True, opacity=0.75)
+    fig.update_layout(
+        xaxis_title=f"{y} - {dimensions[y]['label']}",
+        yaxis_title=x,
+        showlegend=False,
     )
     st.plotly_chart(fig, width="stretch")
 
     group_table = (
-        data.groupby(x, dropna=False)[y]
+        temp.groupby(x, dropna=False)[y]
         .agg(["count", "mean", "median", "std"])
         .sort_values("mean", ascending=False)
         .reset_index()
     )
 
+    test_name, stat, p_value = group_test(temp, x, y)
+
     st.markdown("**Resumen por grupo**")
     st.dataframe(group_table.round(2), width="stretch", hide_index=True)
 
     top_group = group_table.iloc[0]
+    bottom_group = group_table.iloc[-1]
+
     st.markdown(
         f"""
         **Interpretación:**  
         El grupo con mayor promedio en **{dimensions[y]['label']}** es 
         **{top_group[x]}**, con una media de **{top_group['mean']:.2f}**.  
-        Esta comparación permite priorizar segmentos específicos para intervención o seguimiento.
+        El grupo con menor promedio es **{bottom_group[x]}**, con una media de **{bottom_group['mean']:.2f}**.
+
+        **Prueba estadística:** se aplicó **{test_name}**. El valor p fue **{safe_p_value_text(p_value)}**,
+        por lo tanto **{interpret_group_test(p_value)}**.
         """
+    )
+
+    st.caption(
+        "Si hay dos grupos se usa Mann-Whitney U. Si hay tres o más grupos se usa Kruskal-Wallis. "
+        "Estas pruebas son adecuadas porque no exigen normalidad estricta."
     )
 
 
@@ -589,14 +713,23 @@ def plot_final_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
 
     rho_sat_ir, _ = corr_value(data, "SAT", "IR")
     rho_bu_dl, _ = corr_value(data, "BU", "DL")
+    rho_bu_som, _ = corr_value(data, "BU", "SOM")
+    rho_dl_som, _ = corr_value(data, "DL", "SOM")
     rho_cl_sat, _ = corr_value(data, "CL", "SAT")
+    rho_cl_bu, _ = corr_value(data, "CL", "BU")
 
     st.markdown(
         f"""
-        ### Hallazgo principal
+        ### Lectura final para la presentación
 
-        El análisis muestra que el bienestar laboral no depende de una sola variable, sino del equilibrio entre 
-        **demandas laborales** y **recursos organizacionales**.
+        Este dashboard responde las preguntas centrales del proyecto desde una lógica de historia:
+
+        1. **Perfil:** primero se identifica quiénes componen la muestra.
+        2. **Riesgos:** después se priorizan las dimensiones con mayor urgencia.
+        3. **Distribuciones:** luego se revisa cómo se comportan los puntajes.
+        4. **Relaciones:** se analizan asociaciones entre dimensiones críticas.
+        5. **Grupos:** se observan diferencias por cargo, sector, modalidad y personas a cargo.
+        6. **Cierre:** se conectan los hallazgos con recomendaciones organizacionales.
 
         En la muestra filtrada, las tres dimensiones que aparecen como mayor prioridad son:
 
@@ -604,28 +737,33 @@ def plot_final_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
         2. **{top_3.iloc[1]["Dimensión"]}** ({top_3.iloc[1]["Urgencia 0-100"]:.1f}/100)
         3. **{top_3.iloc[2]["Dimensión"]}** ({top_3.iloc[2]["Urgencia 0-100"]:.1f}/100)
 
-        La relación entre **Burnout y Desgaste laboral** es {corr_direction(rho_bu_dl)} 
-        {corr_strength(rho_bu_dl)} ($\\rho$ = {rho_bu_dl:.2f}), lo cual sugiere que el agotamiento emocional 
-        y el deterioro laboral tienden a presentarse juntos.
+        ### Respuestas clave del análisis
 
-        La relación entre **Satisfacción e Intención de retiro** es {corr_direction(rho_sat_ir)} 
-        {corr_strength(rho_sat_ir)} ($\\rho$ = {rho_sat_ir:.2f}). Si es negativa, confirma que una mayor 
-        satisfacción laboral se asocia con menor intención de abandonar la organización.
+        - **Burnout, desgaste laboral y somatización:** BU–DL presenta una relación
+          {corr_direction(rho_bu_dl)} {corr_strength(rho_bu_dl)} ($\\rho$ = {rho_bu_dl:.2f});
+          BU–SOM es {corr_direction(rho_bu_som)} {corr_strength(rho_bu_som)} ($\\rho$ = {rho_bu_som:.2f});
+          y DL–SOM es {corr_direction(rho_dl_som)} {corr_strength(rho_dl_som)} ($\\rho$ = {rho_dl_som:.2f}).
+          Esto muestra que el malestar laboral tiende a acumularse en varias dimensiones.
 
-        Finalmente, la relación entre **Compromiso del líder y Satisfacción** es {corr_direction(rho_cl_sat)} 
-        {corr_strength(rho_cl_sat)} ($\\rho$ = {rho_cl_sat:.2f}), lo que posiciona al liderazgo como un 
-        posible recurso protector dentro del ambiente laboral.
+        - **Liderazgo como recurso protector:** CL–SAT es {corr_direction(rho_cl_sat)}
+          {corr_strength(rho_cl_sat)} ($\\rho$ = {rho_cl_sat:.2f}) y CL–BU es
+          {corr_direction(rho_cl_bu)} {corr_strength(rho_cl_bu)} ($\\rho$ = {rho_cl_bu:.2f}).
+          Por eso el compromiso del líder se interpreta como un recurso organizacional importante.
+
+        - **Satisfacción e intención de retiro:** SAT–IR es {corr_direction(rho_sat_ir)}
+          {corr_strength(rho_sat_ir)} ($\\rho$ = {rho_sat_ir:.2f}). Si esta relación es negativa,
+          se interpreta que mayor satisfacción se asocia con menor intención de abandonar la organización.
         """
     )
 
     st.markdown("### Recomendaciones")
     st.markdown(
         """
-        - Priorizar intervenciones sobre las dimensiones de mayor urgencia.
-        - Fortalecer prácticas de liderazgo, acompañamiento y comunicación organizacional.
-        - Monitorear burnout, desgaste y somatización como indicadores tempranos de riesgo.
-        - Diseñar acciones diferenciadas por cargo, sector y modalidad de trabajo.
-        - Usar este dashboard como herramienta de seguimiento y conversación con equipos de talento humano.
+        - Priorizar intervenciones sobre las dimensiones de mayor urgencia, no solo sobre las de mayor promedio.
+        - Fortalecer liderazgo, comunicación, claridad de rol y apoyo social como recursos protectores.
+        - Monitorear burnout, desgaste y somatización como señales tempranas de deterioro del bienestar.
+        - Revisar diferencias por cargo, sector, modalidad y personas a cargo antes de diseñar acciones generales.
+        - Usar el dashboard como herramienta de conversación con talento humano: permite filtrar grupos y ver si el riesgo cambia.
         """
     )
 
@@ -639,8 +777,8 @@ filtered = filtered_by_sidebar(df)
 
 st.title("Dashboard — Bienestar laboral")
 st.caption(
-    "Análisis exploratorio de dimensiones psicosociales, demandas laborales, recursos organizacionales "
-    "y patrones de bienestar en trabajadores."
+    "Dashboard de presentación del proyecto: perfil de la muestra, riesgo psicosocial, distribuciones, "
+    "relaciones entre dimensiones, comparaciones por grupo y recomendaciones organizacionales."
 )
 
 if filtered.empty:

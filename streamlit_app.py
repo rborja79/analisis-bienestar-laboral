@@ -582,6 +582,9 @@ def plot_key_relationships(data: pd.DataFrame) -> None:
             y: f"{y} - {dimensions[y]['label']}",
         },
     )
+
+    fig.update_xaxes(rangemode="tozero")
+    fig.update_yaxes(rangemode="tozero")
     st.plotly_chart(fig, width="stretch")
 
     st.markdown(

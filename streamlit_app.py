@@ -705,6 +705,20 @@ def plot_group_comparisons(data: pd.DataFrame) -> None:
         "Estas pruebas son adecuadas porque no exigen normalidad estricta."
     )
 
+def urgency_level(value: float) -> str:
+    if value >= 66:
+        return "Alta"
+    if value >= 33:
+        return "Media"
+    return "Baja"
+
+
+def urgency_icon(value: float) -> str:
+    if value >= 66:
+        return "🔴"
+    if value >= 33:
+        return "🟠"
+    return "🟢"
 
 def plot_final_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
     st.subheader("6. Cierre: hallazgos y recomendaciones")
@@ -712,7 +726,7 @@ def plot_final_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
     if data.empty:
         return
 
-    top_3 = risk_df.head(3)
+    top_3 = risk_df.head(3).copy()
 
     rho_sat_ir, _ = corr_value(data, "SAT", "IR")
     rho_bu_dl, _ = corr_value(data, "BU", "DL")
@@ -722,51 +736,146 @@ def plot_final_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
     rho_cl_bu, _ = corr_value(data, "CL", "BU")
 
     st.markdown(
+        """
+        ### Síntesis ejecutiva
+
+        El bienestar laboral no depende de una sola dimensión. En la muestra analizada se observa una combinación
+        entre **demandas laborales**, **recursos organizacionales** y **condiciones del trabajo**.
+
+        Esta sección resume los resultados más importantes para cerrar la presentación y convertir los hallazgos
+        en posibles acciones organizacionales.
+        """
+    )
+
+    # ========================================================
+    # Visual 1: Radar chart de cierre
+    # ========================================================
+
+    radar_df = risk_df.copy()
+    radar_df["Nivel"] = radar_df["Urgencia 0-100"]
+
+    fig_radar = go.Figure()
+
+    for tipo in ["Riesgo", "Recurso"]:
+        temp = radar_df[radar_df["Tipo"] == tipo]
+
+        fig_radar.add_trace(
+            go.Scatterpolar(
+                r=temp["Nivel"],
+                theta=temp["Dimensión"],
+                fill="toself",
+                name=tipo,
+                opacity=0.65,
+            )
+        )
+
+    fig_radar.update_layout(
+        title="Mapa general de urgencia por tipo de dimensión",
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100]
+            )
+        ),
+        height=600,
+        showlegend=True,
+    )
+
+    st.plotly_chart(fig_radar, width="stretch")
+
+    st.caption(
+        "Este radar resume el estado general de las dimensiones. Valores más alejados del centro indican mayor urgencia. "
+        "En riesgos, mayor puntaje significa mayor exposición. En recursos, mayor urgencia significa menor protección."
+    )
+
+    # ========================================================
+    # Visual 2: Tabla semáforo de prioridades
+    # ========================================================
+
+    st.markdown("### Tabla semáforo de prioridades")
+
+    priority_table = risk_df.copy()
+    priority_table["Nivel"] = priority_table["Urgencia 0-100"].apply(urgency_level)
+    priority_table["Lectura"] = priority_table["Urgencia 0-100"].apply(urgency_icon) + " " + priority_table["Nivel"]
+
+    st.dataframe(
+        priority_table[
+            ["Código", "Dimensión", "Tipo", "Media", "Urgencia 0-100", "Lectura"]
+        ].round(2),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.markdown(
         f"""
-        ### Lectura final para la presentación
-
-        Este dashboard responde las preguntas centrales del proyecto desde una lógica de historia:
-
-        1. **Perfil:** primero se identifica quiénes componen la muestra.
-        2. **Riesgos:** después se priorizan las dimensiones con mayor urgencia.
-        3. **Distribuciones:** luego se revisa cómo se comportan los puntajes.
-        4. **Relaciones:** se analizan asociaciones entre dimensiones críticas.
-        5. **Grupos:** se observan diferencias por cargo, sector, modalidad y personas a cargo.
-        6. **Cierre:** se conectan los hallazgos con recomendaciones organizacionales.
-
         En la muestra filtrada, las tres dimensiones que aparecen como mayor prioridad son:
 
         1. **{top_3.iloc[0]["Dimensión"]}** ({top_3.iloc[0]["Urgencia 0-100"]:.1f}/100)
         2. **{top_3.iloc[1]["Dimensión"]}** ({top_3.iloc[1]["Urgencia 0-100"]:.1f}/100)
         3. **{top_3.iloc[2]["Dimensión"]}** ({top_3.iloc[2]["Urgencia 0-100"]:.1f}/100)
-
-        ### Respuestas clave del análisis
-
-        - **Burnout, desgaste laboral y somatización:** BU–DL presenta una relación
-          {corr_direction(rho_bu_dl)} {corr_strength(rho_bu_dl)} ($\\rho$ = {rho_bu_dl:.2f});
-          BU–SOM es {corr_direction(rho_bu_som)} {corr_strength(rho_bu_som)} ($\\rho$ = {rho_bu_som:.2f});
-          y DL–SOM es {corr_direction(rho_dl_som)} {corr_strength(rho_dl_som)} ($\\rho$ = {rho_dl_som:.2f}).
-          Esto muestra que el malestar laboral tiende a acumularse en varias dimensiones.
-
-        - **Liderazgo como recurso protector:** CL–SAT es {corr_direction(rho_cl_sat)}
-          {corr_strength(rho_cl_sat)} ($\\rho$ = {rho_cl_sat:.2f}) y CL–BU es
-          {corr_direction(rho_cl_bu)} {corr_strength(rho_cl_bu)} ($\\rho$ = {rho_cl_bu:.2f}).
-          Por eso el compromiso del líder se interpreta como un recurso organizacional importante.
-
-        - **Satisfacción e intención de retiro:** SAT–IR es {corr_direction(rho_sat_ir)}
-          {corr_strength(rho_sat_ir)} ($\\rho$ = {rho_sat_ir:.2f}). Si esta relación es negativa,
-          se interpreta que mayor satisfacción se asocia con menor intención de abandonar la organización.
         """
     )
 
-    st.markdown("### Recomendaciones")
+    # ========================================================
+    # Hallazgos finales
+    # ========================================================
+
+    st.markdown("### Hallazgos clave")
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.info(
+            f"""
+            **Malestar acumulado**  
+            Burnout, desgaste laboral y somatización se relacionan entre sí.
+
+            - BU–DL: ρ = {rho_bu_dl:.2f}
+            - BU–SOM: ρ = {rho_bu_som:.2f}
+            - DL–SOM: ρ = {rho_dl_som:.2f}
+
+            Esto sugiere que el deterioro laboral puede aparecer en varias dimensiones al mismo tiempo.
+            """
+        )
+
+    with c2:
+        st.success(
+            f"""
+            **Liderazgo como recurso protector**  
+            El compromiso del líder se asocia con mejores resultados.
+
+            - CL–SAT: ρ = {rho_cl_sat:.2f}
+            - CL–BU: ρ = {rho_cl_bu:.2f}
+
+            Un liderazgo más comprometido tiende a relacionarse con más satisfacción y menor burnout.
+            """
+        )
+
+    with c3:
+        st.warning(
+            f"""
+            **Satisfacción e intención de retiro**  
+            SAT–IR presenta una relación {corr_direction(rho_sat_ir)} {corr_strength(rho_sat_ir)}.
+
+            - SAT–IR: ρ = {rho_sat_ir:.2f}
+
+            A mayor satisfacción laboral, menor intención de abandonar la organización.
+            """
+        )
+
+    # ========================================================
+    # Recomendaciones
+    # ========================================================
+
+    st.markdown("### Recomendaciones organizacionales")
+
     st.markdown(
         """
-        - Priorizar intervenciones sobre las dimensiones de mayor urgencia, no solo sobre las de mayor promedio.
+        - Priorizar las dimensiones con mayor urgencia, no solo las que tengan mayor promedio.
         - Fortalecer liderazgo, comunicación, claridad de rol y apoyo social como recursos protectores.
-        - Monitorear burnout, desgaste y somatización como señales tempranas de deterioro del bienestar.
+        - Monitorear burnout, desgaste laboral y somatización como señales tempranas de deterioro.
         - Revisar diferencias por cargo, sector, modalidad y personas a cargo antes de diseñar acciones generales.
-        - Usar el dashboard como herramienta de conversación con talento humano: permite filtrar grupos y ver si el riesgo cambia.
+        - Usar el dashboard como herramienta de conversación con talento humano para decidir dónde intervenir primero.
         """
     )
 

@@ -820,46 +820,37 @@ def plot_final_story(data: pd.DataFrame, risk_df: pd.DataFrame) -> None:
     # Hallazgos finales
     # ========================================================
 
-    st.markdown("### Hallazgos clave")
+    st.markdown("### Qué significa esto para la organización")
 
     c1, c2, c3 = st.columns(3)
 
     with c1:
         st.info(
-            f"""
-            **Malestar acumulado**  
-            Burnout, desgaste laboral y somatización se relacionan entre sí.
+            """
+            **Riesgo acumulado**  
+            Cuando burnout, desgaste y somatización aparecen relacionados, no conviene tratarlos como problemas aislados.
 
-            - BU–DL: ρ = {rho_bu_dl:.2f}
-            - BU–SOM: ρ = {rho_bu_som:.2f}
-            - DL–SOM: ρ = {rho_dl_som:.2f}
-
-            Esto sugiere que el deterioro laboral puede aparecer en varias dimensiones al mismo tiempo.
+            La intervención debería revisar carga laboral, recuperación, pausas y señales físicas de estrés.
             """
         )
 
     with c2:
         st.success(
-            f"""
-            **Liderazgo como recurso protector**  
-            El compromiso del líder se asocia con mejores resultados.
+            """
+            **Recursos protectores**  
+            El liderazgo, la claridad de rol y el apoyo social pueden funcionar como barreras frente al deterioro.
 
-            - CL–SAT: ρ = {rho_cl_sat:.2f}
-            - CL–BU: ρ = {rho_cl_bu:.2f}
-
-            Un liderazgo más comprometido tiende a relacionarse con más satisfacción y menor burnout.
+            La organización no solo debe reducir riesgos, también fortalecer recursos.
             """
         )
 
     with c3:
         st.warning(
-            f"""
-            **Satisfacción e intención de retiro**  
-            SAT–IR presenta una relación {corr_direction(rho_sat_ir)} {corr_strength(rho_sat_ir)}.
+            """
+            **Retención del talento**  
+            La satisfacción laboral está fuertemente asociada con menor intención de retiro.
 
-            - SAT–IR: ρ = {rho_sat_ir:.2f}
-
-            A mayor satisfacción laboral, menor intención de abandonar la organización.
+            Mejorar la experiencia laboral puede ayudar a disminuir riesgo de rotación.
             """
         )
 

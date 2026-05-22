@@ -430,7 +430,7 @@ def plot_risk_ranking(risk_df: pd.DataFrame) -> None:
     )
 
     plot_df = risk_df.sort_values("Urgencia 0-100", ascending=True).copy()
-    colors = plot_df["Tipo"].map({"Riesgo": "#EF553B", "Recurso": "#00CC96"}).fillna("#636EFA")
+    colors = plot_df["Tipo"].map({"Riesgo": "#3333D7", "Recurso": "#7D7DE5"}).fillna("#636EFA")
 
     fig = go.Figure()
 
